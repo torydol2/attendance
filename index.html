@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>출퇴근</title>
+<style>
+  :root { --bg:#f3f5f1; --card:#fff; --ink:#1c2a1f; --sub:#5b6a5e; --in:#2f7d43; --in-bg:#e2f1e5; --out:#2a5bb0; --out-bg:#e4ecfa; --err:#b3261e; --err-bg:#fde7e5; --line:#d5ddd5; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#121612; --card:#1c221d; --ink:#e8efe8; --sub:#a3b1a5; --in:#6cc485; --in-bg:#1f3325; --out:#7ea6ee; --out-bg:#1d2a40; --err:#ff8a80; --err-bg:#3a1f1d; --line:#334035; } }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; background:var(--bg); color:var(--ink);
+         font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif; }
+  .card { width:min(420px, calc(100% - 32px)); background:var(--card); border-radius:22px; padding:36px 24px; text-align:center; box-shadow:0 8px 30px rgba(0,0,0,.08); }
+  .badge { display:inline-block; padding:8px 18px; border-radius:999px; font-weight:800; font-size:18px; }
+  .in { background:var(--in-bg); color:var(--in); } .out { background:var(--out-bg); color:var(--out); }
+  .check { font-size:64px; line-height:1; margin:18px 0 6px; }
+  .time { font-size:60px; font-weight:800; letter-spacing:-1px; margin:8px 0 4px; font-variant-numeric:tabular-nums; }
+  .name { font-size:24px; font-weight:700; margin-top:6px; }
+  .msg { font-size:17px; line-height:1.6; color:var(--sub); margin-top:14px; }
+  .err { color:var(--err); } .errbox { background:var(--err-bg); color:var(--err); border-radius:14px; padding:14px; margin-top:16px; font-size:16px; line-height:1.5; }
+  input { font-size:30px; letter-spacing:8px; text-align:center; width:100%; padding:14px; margin-top:18px; border:2px solid var(--line); border-radius:14px; background:transparent; color:var(--ink); }
+  button { margin-top:14px; width:100%; padding:17px; font-size:20px; font-weight:800; border:0; border-radius:14px; background:var(--in); color:#fff; }
+  button:disabled { opacity:.5; }
+  .spin { width:44px; height:44px; margin:24px auto 0; border:5px solid var(--line); border-top-color:var(--in); border-radius:50%; animation:r 0.9s linear infinite; }
+  @keyframes r { to { transform:rotate(360deg); } }
+  h1 { font-size:22px; margin:16px 0 0; }
+</style>
+</head>
+<body>
+<div class="card" id="app"></div>
+<script>
+  // ▼▼▼ Apps Script 웹 앱 주소를 여기에 붙여넣기 ▼▼▼
+  const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzbzD6-7LCbvS5zt2rW_nJ_TaQJBmMWRZBl72xQmN4DylyHPk-m2O7U7of60rMGJfxq/exec';
+  // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
+  const type = new URLSearchParams(location.search).get('t') === 'out' ? 'out' : 'in';
+  const label = type === 'in' ? '출근' : '퇴근';
+  const KEY = 'ksc_att_token';
+  const store = {
+    get() { try { return localStorage.getItem(KEY); } catch (e) { return null; } },
+    set(v) { try { localStorage.setItem(KEY, v); } catch (e) {} },
+    del() { try { localStorage.removeItem(KEY); } catch (e) {} }
+  };
+  const $app = document.getElementById('app');
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const badge = `<span class="badge ${type}">${label}</span>`;
+
+  async function call(body) {
+    const r = await fetch(SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
+    return r.json();
+  }
+
+  function getPos() {
+    return new Promise(res => {
+      if (!navigator.geolocation) return res(null);
+      navigator.geolocation.getCurrentPosition(
+        p => res({ lat: p.coords.latitude, lng: p.coords.longitude, acc: Math.round(p.coords.accuracy) }),
+        () => res(null),
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
+    });
+  }
+
+  function loading(text) { $app.innerHTML = `${badge}<div class="spin"></div><div class="msg">${esc(text)}</div>`; }
+
+  function retryView(msg) {
+    $app.innerHTML = `${badge}<div class="errbox">${esc(msg)}</div><button id="retry">다시 시도</button>`;
+    document.getElementById('retry').onclick = punch;
+  }
+
+  async function punch() {
+    loading('위치 확인 중…');
+    const pos = await getPos();
+    loading(label + ' 기록 중…');
+    try {
+      const r = await call({ action: 'punch', token: store.get(), type, lat: pos ? pos.lat : null, lng: pos ? pos.lng : null, acc: pos ? pos.acc : null });
+      if (r.needRegister) { store.del(); return showRegister('등록 정보가 없어 다시 등록이 필요합니다.'); }
+      if (!r.ok) return retryView(r.msg || '기록되지 않았습니다.');
+      if (navigator.vibrate) navigator.vibrate(120);
+      $app.innerHTML = `${badge}
+        <div class="check">✓</div>
+        <div class="time">${esc(r.time)}</div>
+        <div class="name">${esc(r.name)}님 ${label}</div>
+        <div class="msg">${r.dup ? '이미 기록되어 있습니다.' : '기록되었습니다.'}</div>
+        ${r.warn ? `<div class="errbox">${esc(r.warn)}</div>` : ''}`;
+    } catch (e) {
+      retryView('인터넷 연결을 확인하고 다시 시도해 주세요.');
+    }
+  }
+
+  function showRegister(note) {
+    $app.innerHTML = `${badge}
+      <h1>처음 한 번만 등록</h1>
+      <div class="msg">${note ? esc(note) + '<br>' : ''}사장님께 받은 <b>등록코드</b>를 입력해 주세요.</div>
+      <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="······">
+      <button id="go">등록하고 ${label}</button>
+      <div class="msg err" id="err"></div>`;
+    const $code = document.getElementById('code'), $go = document.getElementById('go'), $err = document.getElementById('err');
+    $code.focus();
+    $go.onclick = async () => {
+      $go.disabled = true; $err.textContent = '';
+      try {
+        const r = await call({ action: 'register', code: $code.value.trim() });
+        if (!r.ok) { $err.textContent = r.msg; $go.disabled = false; return; }
+        store.set(r.token);
+        punch();
+      } catch (e) { $err.textContent = '인터넷 연결을 확인해 주세요.'; $go.disabled = false; }
+    };
+  }
+
+  store.get() ? punch() : showRegister();
+</script>
+</body>
+</html>
